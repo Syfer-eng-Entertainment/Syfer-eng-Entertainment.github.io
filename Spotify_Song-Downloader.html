@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify MP3 Converter</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js"></script>
+    <style>
+        :root {
+            --spotify-green: #1DB954;
+            --spotify-black: #191414;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background: linear-gradient(45deg, var(--spotify-green), var(--spotify-black));
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #333;
+        }
+
+        .converter-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 2rem;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            color: var(--spotify-black);
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .url-input {
+            width: 100%;
+            padding: 1rem;
+            border: 2px solid #ddd;
+            border-radius: 25px;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        .url-input:focus {
+            border-color: var(--spotify-green);
+            outline: none;
+        }
+
+        .song-info {
+            display: flex;
+            align-items: center;
+            background: #f5f5f5;
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+        }
+
+        .album-art {
+            width: 80px;
+            height: 80px;
+            border-radius: 5px;
+            margin-right: 1rem;
+            object-fit: cover;
+        }
+
+        .song-details h3 {
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .quality-selector {
+            margin: 1rem 0;
+        }
+
+        .quality-selector select {
+            width: 100%;
+            padding: 0.8rem;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            font-size: 1rem;
+            background: white;
+        }
+
+        .download-btn {
+            width: 100%;
+            padding: 1rem;
+            background: var(--spotify-green);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, background-color 0.2s;
+        }
+
+        .download-btn:hover {
+            transform: scale(1.02);
+            background: #1ed760;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: #ddd;
+            border-radius: 5px;
+            margin: 1rem 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--spotify-green);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .status-message {
+            text-align: center;
+            color: #666;
+            margin-top: 1rem;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="converter-container">
+        <div class="header">
+            <h1>Spotify MP3 Converter</h1>
+            <p>Convert your favorite Spotify tracks to MP3</p>
+        </div>
+
+        <input type="text" class="url-input" id="spotify-url" 
+               placeholder="Paste Spotify track URL here">
+
+        <div id="song-details" class="hidden">
+            <div class="song-info">
+                <img id="album-art" class="album-art" src="" alt="Album Art">
+                <div class="song-details">
+                    <h3 id="song-title"></h3>
+                    <p id="artist-name"></p>
+                </div>
+            </div>
+
+            <div class="quality-selector">
+                <h4>Select Quality:</h4>
+                <select id="quality">
+                    <option value="320">320 kbps - High Quality</option>
+                    <option value="256">256 kbps - Good Quality</option>
+                    <option value="192">192 kbps - Standard Quality</option>
+                </select>
+            </div>
+
+            <div class="progress-bar hidden" id="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+
+            <button class="download-btn" id="download-btn" onclick="startDownload()">
+                Convert and Download
+            </button>
+
+            <p class="status-message" id="status-message"></p>
+        </div>
+    </div>
+
+    <script>
+        const API_ENDPOINT = 'https://api.spotify.com/v1';
+        const CLIENT_ID = '162f27cb98944a41a72990dee0997f8f';
+        const CLIENT_SECRET = '45a03cfe0933432aa004717a27d3db2c';
+        
+        let accessToken = null;
+        let currentTrack = null;
+
+        async function getSpotifyToken() {
+            const response = await fetch('https://accounts.spotify.com/api/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Authorization': 'Basic ' + btoa(CLIENT_ID + ':' + CLIENT_SECRET)
+                },
+                body: 'grant_type=client_credentials'
+            });
+            const data = await response.json();
+            accessToken = data.access_token;
+        }
+
+        async function getTrackInfo(trackId) {
+            if (!accessToken) await getSpotifyToken();
+            
+            const response = await fetch(`${API_ENDPOINT}/tracks/${trackId}`, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            });
+            return await response.json();
+        }
+
+        async function processSpotifyUrl() {
+            const url = document.getElementById('spotify-url').value;
+            const trackId = extractTrackId(url);
+            
+            if (!trackId) {
+                showStatus('Invalid Spotify URL', 'error');
+                return;
+            }
+
+            try {
+                showStatus('Fetching track information...');
+                const trackInfo = await getTrackInfo(trackId);
+                displayTrackInfo(trackInfo);
+            } catch (error) {
+                showStatus('Error fetching track information', 'error');
+            }
+        }
+
+        function extractTrackId(url) {
+            const match = url.match(/track\/([a-zA-Z0-9]+)/);
+            return match ? match[1] : null;
+        }
+
+        function displayTrackInfo(track) {
+            currentTrack = track;
+            document.getElementById('song-title').textContent = track.name;
+            document.getElementById('artist-name').textContent = track.artists.map(a => a.name).join(', ');
+            document.getElementById('album-art').src = track.album.images[0].url;
+            document.getElementById('song-details').classList.remove('hidden');
+        }
+
+        async function startDownload() {
+            if (!currentTrack) return;
+
+            const quality = document.getElementById('quality').value;
+            const progressBar = document.getElementById('progress-bar');
+            const progressFill = document.getElementById('progress-fill');
+            
+            progressBar.classList.remove('hidden');
+            showStatus('Converting track...');
+
+            try {
+                // Simulate progress (in real implementation, this would be actual conversion progress)
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += 1;
+                    progressFill.style.width = `${progress}%`;
+                    if (progress >= 100) {
+                        clearInterval(interval);
+                        completeDownload();
+                    }
+                }, 50);
+            } catch (error) {
+                showStatus('Error during conversion', 'error');
+            }
+        }
+
+        function completeDownload() {
+            showStatus('Download complete!', 'success');
+            // In a real implementation, this would trigger the actual file download
+        }
+
+        function showStatus(message, type = 'info') {
+            const statusElement = document.getElementById('status-message');
+            statusElement.textContent = message;
+            statusElement.className = `status-message ${type}`;
+        }
+
+        // Event listeners
+        document.getElementById('spotify-url').addEventListener('input', 
+            debounce(processSpotifyUrl, 500));
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
+    </script>
+</body>
+</html>
